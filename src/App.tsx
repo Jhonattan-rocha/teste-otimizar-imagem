@@ -1,173 +1,160 @@
-import React, { useState, useEffect, useRef } from 'react';
-import styled from 'styled-components';
+// components/CameraCapture.tsx
+import React, { useRef, useState, useEffect } from 'react';
+import * as fabric from 'fabric';
 
-interface VideoContainerProps {
-  recording: boolean;
-}
-
-const VideoContainer = styled.div<VideoContainerProps>`
-  position: relative;
-  width: 100%;
-  max-width: 800px;
-  margin: 20px auto;
-  border: 5px solid ${(props) => (props.recording ? 'red' : 'green')};
-  border-radius: 10px;
-  box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.2);
-  overflow: hidden;
-`;
-
-const VideoElement = styled.video`
-  width: 100%;
-  height: auto;
-  background: #000; /* Cor de fundo enquanto a câmera carrega */
-`;
-
-const ControlsContainer = styled.div`
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-  background-color: rgba(0, 0, 0, 0.5);
-  padding: 10px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  opacity: 0;
-  transition: opacity 0.3s ease;
-
-  ${VideoContainer}:hover & {
-    opacity: 1;
-  }
-`;
-
-const ControlButton = styled.button`
-  background-color: #4caf50;
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  text-align: center;
-  text-decoration: none;
-  display: inline-block;
-  font-size: 16px;
-  margin: 0 5px;
-  cursor: pointer;
-  border-radius: 5px;
-  transition: background-color 0.3s ease;
-
-  &:hover {
-    background-color: #3e8e41;
-  }
-
-  &:disabled {
-    background-color: #ccc;
-    cursor: not-allowed;
-  }
-`;
-
-const CameraComponent: React.FC = () => {
+const CameraCapture: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
-  const [recording, setRecording] = useState<boolean>(false);
-  const [recordedChunks, setRecordedChunks] = useState<Blob[]>([]);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [recordedMedia, setRecordedMedia] = useState<Blob[]>([]);
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  const [fabricCanvas, setFabricCanvas] = useState<fabric.Canvas | null>(null);
+  const [selectedImage, setSelectedImage] = useState<number | null>(null);
 
-  // Capturar o stream da câmera
+  async function init(){
+      // Initialize Fabric.js canvas lazily
+      if (canvasRef.current && !fabricCanvas) {
+        const canvas = new fabric.Canvas(canvasRef.current, {
+          selection: true, // Enable object selection
+        });
+        setFabricCanvas(canvas);
+      }
+  }
+  
   useEffect(() => {
-    async function getCameraStream() {
-      try {
-        const mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: 1920 }, // Resolução desejada
-            height: { ideal: 1080 },
-            facingMode: 'user', // Câmera frontal
-          },
-          audio: true, // Capturar áudio também
-        });
-        setStream(mediaStream);
-        if (videoRef.current) {
-          videoRef.current.srcObject = mediaStream;
-        }
-      } catch (error) {
-        console.error('Erro ao acessar a câmera:', error);
-        alert('Erro ao acessar a câmera. Por favor, verifique as permissões do seu navegador.');
-      }
-    }
+    init()
+  }, []);
 
-    getCameraStream();
-
+  // Clean up Fabric.js on unmount
+  useEffect(() => {
     return () => {
-      // Limpar o stream quando o componente for desmontado
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
-      }
+      fabricCanvas?.dispose();
     };
-  }, [stream]);
+  }, [fabricCanvas]);
 
-  // Iniciar a gravação
-  const handleStartRecording = () => {
-    if (stream) {
-        mediaRecorderRef.current = new MediaRecorder(stream, {
-            mimeType: 'video/webm;codecs=vp9', // Codec de vídeo eficiente
-        });
+  // Start the camera
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
 
-        mediaRecorderRef.current.ondataavailable = (event) => {
-            if (event.data.size > 0) {
-                setRecordedChunks((prev) => [...prev, event.data]);
-            }
+        // Configure MediaRecorder for video recording
+        const recorder = new MediaRecorder(stream);
+        setMediaRecorder(recorder);
+
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            setRecordedMedia((prev) => [...prev, event.data]);
+          }
         };
-
-        mediaRecorderRef.current.onstop = () => {
-            // Lógica para lidar com o fim da gravação (pode ser movida para um handler separado)
-        };
-
-        mediaRecorderRef.current.start();
-        setRecording(true);
+      }
+    } catch (err) {
+      console.error('Error accessing the camera:', err);
     }
   };
 
-  // Parar a gravação
-  const handleStopRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop();
-      setRecording(false);
+  // Recording controls
+  const startRecording = () => {
+    if (mediaRecorder) {
+      mediaRecorder.start();
+      console.log('Recording started');
     }
   };
 
-  // Download do vídeo gravado (simulação de salvamento no filesystem)
+  const stopRecording = () => {
+    if (mediaRecorder) {
+      mediaRecorder.stop();
+      console.log('Recording stopped');
+    }
+  };
+
+  // Handle image click for editing on Fabric.js
+  const handleImageClick = (index: number) => {
+    setSelectedImage(index);
+    const url = URL.createObjectURL(recordedMedia[index]);
+
+    fabric.FabricImage.fromURL(url, (img) => {
+      img.set({
+        left: 50,
+        top: 50,
+        scaleX: 0.5,
+        scaleY: 0.5,
+      });
+
+      fabricCanvas?.clear(); // Clear previous canvas objects
+      fabricCanvas?.add(img);
+    });
+  };
+
+  // Download selected recording
   const handleDownload = () => {
-    if (recordedChunks.length) {
-      const blob = new Blob(recordedChunks, { type: 'video/webm' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      document.body.appendChild(a);
-      a.style.display = 'none';
-      a.href = url;
-      a.download = `gravacao-${new Date().toISOString()}.webm`; // Nome do arquivo com timestamp
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-
-      // Limpar os chunks após o download
-      setRecordedChunks([]);
+    if (selectedImage !== null) {
+      const url = URL.createObjectURL(recordedMedia[selectedImage]);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `recording-${selectedImage}.webm`;
+      anchor.click();
+      URL.revokeObjectURL(url);
     }
   };
+
+  // Fabric.js utility functions
+  const addText = () => fabricCanvas?.add(new fabric.Textbox('Text', { left: 100, top: 100 }));
+  const addRectangle = () => fabricCanvas?.add(new fabric.Rect({ left: 100, top: 100, width: 100, height: 50, fill: 'red' }));
+  const addCircle = () => fabricCanvas?.add(new fabric.Circle({ left: 100, top: 100, radius: 50, fill: 'blue' }));
+  const deleteSelected = () => {
+    const activeObject = fabricCanvas?.getActiveObject();
+    activeObject && fabricCanvas?.remove(activeObject);
+  };
+  const clearCanvas = () => fabricCanvas?.clear();
 
   return (
-    <VideoContainer recording={recording}>
-      <VideoElement ref={videoRef} autoPlay playsInline muted />
-      <ControlsContainer>
-        <ControlButton onClick={handleStartRecording} disabled={recording}>
-          {recording ? 'Gravando...' : 'Iniciar Gravação'}
-        </ControlButton>
-        <ControlButton onClick={handleStopRecording} disabled={!recording}>
-          Parar Gravação
-        </ControlButton>
-        <ControlButton onClick={handleDownload} disabled={recordedChunks.length === 0}>
-          Download
-        </ControlButton>
-      </ControlsContainer>
-    </VideoContainer>
+    <div>
+      {/* Camera and recording controls */}
+      <button onClick={startCamera}>Start Camera</button>
+      <button onClick={startRecording}>Start Recording</button>
+      <button onClick={stopRecording}>Stop Recording</button>
+
+      {/* Camera view and Fabric.js canvas */}
+      <div style={{ display: 'flex', justifyContent: 'space-around' }}>
+        <video ref={videoRef} autoPlay playsInline style={{ width: 320, height: 240 }} />
+        <canvas ref={canvasRef} width={640} height={480} style={{ border: '1px solid black' }} />
+      </div>
+
+      {/* Recording thumbnails */}
+      <h3>Recordings:</h3>
+      <div style={{ display: 'flex', overflowX: 'auto' }}>
+        {recordedMedia.map((media, index) => (
+          <video
+            key={index}
+            src={URL.createObjectURL(media)}
+            controls
+            width={160}
+            height={120}
+            onClick={() => handleImageClick(index)}
+            style={{
+              margin: 5,
+              cursor: 'pointer',
+              border: selectedImage === index ? '2px solid blue' : 'none',
+            }}
+          />
+        ))}
+      </div>
+
+      {/* Editing tools */}
+      {selectedImage !== null && (
+        <div>
+          <button onClick={handleDownload}>Download Recording</button>
+          <h3>Edit Canvas:</h3>
+          <button onClick={addText}>Add Text</button>
+          <button onClick={addRectangle}>Add Rectangle</button>
+          <button onClick={addCircle}>Add Circle</button>
+          <button onClick={deleteSelected}>Delete Selected</button>
+          <button onClick={clearCanvas}>Clear Canvas</button>
+        </div>
+      )}
+    </div>
   );
 };
 
-export default CameraComponent;
+export default CameraCapture;
